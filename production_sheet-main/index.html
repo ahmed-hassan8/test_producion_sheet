@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Production Batch Recorder</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&display=swap');
+        body { font-family: 'Cairo', sans-serif; background-color: #f3f4f6; }
+        .production-card { background: white; border-radius: 1.5rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .btn-gradient { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); }
+        .text-gradient { background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%); -webkit-background-clip: text; }
+        .required:after { content: "*"; color: red; margin-left: 4px; }
+        .preview-image { max-width: 200px; height: auto; margin: 4px; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+<!-- Login Form -->
+<div id="auth" class="max-w-md mx-auto mt-20">
+    <div class="production-card p-8 text-center">
+        <form id="loginForm" onsubmit="return authenticate(event)">
+            <h2 class="text-2xl font-bold mb-6">Login - تسجيل الدخول</h2>
+            <input type="text" id="username" placeholder="Username" 
+                   class="w-full mb-4 p-2 border rounded" required>
+            <input type="password" id="password" placeholder="Password" 
+                   class="w-full mb-4 p-2 border rounded" required>
+            <button type="submit" class="btn-gradient text-white px-6 py-2 rounded-lg w-full">
+                Login - دخول
+            </button>
+            <div id="error-message" class="text-red-600 mt-4 hidden">Invalid credentials</div>
+        </form>
+    </div>
+</div>
+
+<script>
+    // Single authenticate function
+    function authenticate(event) {
+        event.preventDefault(); // Prevent form submission
+        const username = document.getElementById("username").value.trim();
+        const password = document.getElementById("password").value;
+        
+        if (username === "mk" && password === "2018") {
+            document.getElementById("auth").classList.add("hidden");
+            document.getElementById("content").classList.remove("hidden");
+            document.getElementById("error-message").classList.add("hidden");
+            return true;
+        } else {
+            document.getElementById("error-message").classList.remove("hidden");
+            document.getElementById("password").value = ""; // Clear password field
+            document.getElementById("username").focus(); // Refocus on username
+            return false;
+        }
+    }
+</script>
+    <!-- Main Content -->
+    <div id="content" class="hidden">
+        <div class="max-w-4xl mx-auto">
+            <div class="production-card p-6 mb-8">
+                <div class="flex justify-between items-center mb-8">
+                    <h1 class="text-2xl font-bold text-gradient">Production Batch Recorder</h1>
+                    <h2 class="text-xl text-gray-600">مسجل كمية الإنتاج</h2>
+                </div>
+
+                <div class="space-y-4 md:flex md:gap-4 mb-8">
+                    <div class="flex-1 relative">
+                        <input type="text" id="searchRecipe" placeholder="Select Recipe - اختر الوصفة" 
+                               class="w-full px-4 py-2 border rounded-lg cursor-pointer"
+                               readonly onclick="toggleRecipeDropdown()">
+                        <div id="recipeDropdown" class="absolute z-10 mt-2 w-full bg-white border rounded-lg shadow-lg hidden">
+                            <div id="recipeOptions" class="divide-y divide-gray-200 max-h-60 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                    <div class="flex-1">
+                        <input type="number" id="batchWeight" step="0.1" min="0.1" 
+                               placeholder="Batch in (G) - الوزن الاجمالي بالجرام" 
+                               class="w-full px-4 py-2 border rounded-lg" required>
+                    </div>
+                    <div class="flex-1">
+                        <input type="text" id="preparedBy" placeholder="Branch Name - الفرع " 
+                               class="w-full px-4 py-2 border rounded-lg" required>
+                    </div>
+                </div>
+
+                <div id="ingredientsContainer" class="hidden mb-8">
+                    <h3 class="text-xl font-semibold mb-4">Ingredients - المكونات</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left">Code - الرمز</th>
+                                    <th class="px-4 py-3 text-left">Ingredient - المكون</th>
+                                    <th class="px-4 py-3 text-right">Quantity (g) - الكمية</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ingredientsBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="mb-8">
+                    <h3 class="text-xl font-semibold mb-4 required">Batch Photos - صور الكمية المنتجة</h3>
+                    <input type="file" id="batchPhoto" accept="image/*" class="hidden" multiple required>
+                    <button id="uploadPhotoBtn" class="btn-gradient text-white px-6 py-2 rounded-lg">
+                        Upload Photos - تحميل الصور
+                    </button>
+                    <div id="previewContainer" class="mt-4 flex flex-wrap gap-2"></div>
+                </div>
+
+                <div class="flex justify-end">
+                    <button id="generatePdfBtn" class="btn-gradient text-white px-6 py-2 rounded-lg">
+                        Submit Production - تسجيل الإنتاج
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- PDF Template -->
+        <div id="pdf-content" class="hidden bg-white p-8" style="width: 210mm; min-height: 297mm;">
+            <div class="text-center mb-6">
+                <h1 class="text-2xl font-bold mb-2">Production Report - تقرير الإنتاج</h1>
+                <p id="pdf-datetime" class="text-gray-600 text-sm mb-4"></p>
+                <p class="text-lg font-semibold">Batch Weight: <span id="pdf-batch-weight" class="font-normal"></span> G</p>
+            </div>
+            
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold mb-2">Item Information - معلومات المنتج</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <p class="border-b pb-1">Item Code: <span id="pdf-item-code" class="font-medium"></span></p>
+                    <p class="border-b pb-1">Item Name: <span id="pdf-item-name" class="font-medium"></span></p>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold mb-2">Ingredients - المكونات</h2>
+                <table class="w-full border-collapse">
+                    <thead class="bg-gray-100">
+                        <tr>
+                            <th class="border p-2 text-left w-1/5">Code</th>
+                            <th class="border p-2 text-left w-3/5">Ingredient</th>
+                            <th class="border p-2 text-right w-1/5">Quantity (g)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pdf-ingredients"></tbody>
+                </table>
+            </div>
+
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold mb-2">Batch Photos - صور الكمية المنتجة</h2>
+                <div id="pdf-photos-container" class="space-y-4"></div>
+            </div>
+
+            <div class="mt-12 pt-8 border-t">
+                <div>
+                    <p class="font-semibold">Prepared By: <span id="pdf-prepared-by" class="font-normal"></span></p>
+                    <div class="mt-8 border-t border-dashed w-48"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    function getCurrentMonthFile() {
+        const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+        const currentMonth = months[new Date().getMonth()];
+        return `data/${currentMonth}.json`;
+    }
+
+    async function saveToJSON() {
+        const fileName = getCurrentMonthFile();
+        const batchWeight = document.getElementById('batchWeight').value;
+        const preparedBy = document.getElementById('preparedBy').value;
+        const timestamp = new Date().toLocaleString();
+
+        if (!batchWeight || !preparedBy) {
+            alert("Please fill all fields.");
+            return;
+        }
+
+        const newEntry = { date: timestamp, batchWeight, preparedBy };
+        let storedData = [];
+        try {
+            const response = await fetch(fileName);
+            storedData = await response.json();
+        } catch (error) {
+            console.log("Creating new JSON file.");
+        }
+        storedData.push(newEntry);
+        const jsonData = JSON.stringify(storedData, null, 2);
+        downloadFile(fileName, jsonData);
+        loadMonthlyData();
+    }
+
+    async function loadMonthlyData() {
+        const fileName = getCurrentMonthFile();
+        try {
+            const response = await fetch(fileName);
+            const data = await response.json();
+            const tableBody = document.getElementById('dataTable');
+            tableBody.innerHTML = "";
+            data.forEach(entry => {
+                const row = `<tr><td class="border p-2">${entry.date}</td><td class="border p-2">${entry.batchWeight}</td><td class="border p-2">${entry.preparedBy}</td></tr>`;
+                tableBody.innerHTML += row;
+            });
+        } catch (error) {
+            console.log("No data found for this month.");
+        }
+    }
+
+    function exportJSON() {
+        const fileName = getCurrentMonthFile();
+        fetch(fileName).then(response => response.json()).then(data => {
+            const jsonData = JSON.stringify(data, null, 2);
+            downloadFile(fileName, jsonData);
+        }).catch(error => alert("No data found for this month."));
+    }
+
+    function downloadFile(filename, content) {
+        const blob = new Blob([content], { type: "application/json" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        link.click();
+    }
+
+    document.getElementById('generatePdfBtn').addEventListener('click', () => {
+        saveToJSON();
+        setTimeout(() => generatePDF(), 1000);
+    });
+
+    document.addEventListener("DOMContentLoaded", loadMonthlyData);
+</script>
+
+
+    <script>
+        const { jsPDF } = window.jspdf;
+        let selectedRecipe = null;
+        let uploadedPhotos = [];
+    
+        // Recipe Database
+        const recipes = {
+            'garlic-sauce': {
+                code: 'm98',
+                name: { en: 'Garlic Sauce', ar: 'صوص الثومية' },
+                ingredients: [
+                    { code: 'sk-1274', nameEn: 'Cornstarch', nameAr: 'نشا ذرة'},
+                    { code: 'm69', nameEn: 'Eggs', nameAr: 'بيض'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح',},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'm40', nameEn: 'Vinegar', nameAr: 'خل'},
+                    { code: 'm43', nameEn: 'Garlic', nameAr: 'ثوم'},
+                    { code: 'm77', nameEn: 'Lemon Salt', nameAr: 'ملح ليمون'}
+                ]
+            },
+            'baba-ghanoush': {
+                code: 'm93',
+                name: { en: 'Baba Ghanoush', ar: 'بابا غنوج' },
+                ingredients: [
+                    { code: 'sk-1240', nameEn: 'Grilled Eggplant', nameAr: 'باذنجان مشوي'},
+                    { code: 'm70', nameEn: 'Tomatoes', nameAr: 'طماطم'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm33', nameEn: 'Green Bell Pepper', nameAr: 'فلفل رومي أخضر' },
+                    { code: 'm32', nameEn: 'Red Bell Pepper', nameAr: 'فلفل رومي أحمر'},
+                    { code: 'm34', nameEn: 'Parsley', nameAr: 'بقدونس'},
+                    { code: 'unknown', nameEn: 'Cumin', nameAr: 'كمون'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'sk-1241', nameEn: 'Pomegranate Molasses', nameAr: 'دبس رمان'},
+                    { code: 'm8', nameEn: 'Olive Oil', nameAr: 'زيت زيتون'},
+                    { code: 'm77', nameEn: 'Lemon Salt', nameAr: 'ملح ليمون'}
+                ]
+            },
+            'eggplant-mutabbal': {
+                code: 'm92',
+                name: { en: 'Eggplant Mutabbal', ar: 'متبل باذنجان' },
+                ingredients: [
+                    { code: 'sk-1240', nameEn: 'Grilled Eggplant', nameAr: 'باذنجان مشوي'},
+                    { code: 'm1', nameEn: 'Al Jameel Tahini', nameAr: 'طحينة الجميل'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'sk-1239', nameEn: 'Yogurt', nameAr: 'زبادي'},
+                    { code: 'sk-1234', nameEn: 'Labneh', nameAr: 'لبنة'},
+                    { code: 'm77', nameEn: 'Lemon Salt', nameAr: 'ملح ليمون'}
+                ]
+            },
+            'meat-kebab': {
+                code: 'm87',
+                name: { en: 'Meat Kebab', ar: 'كباب لحم' },
+                ingredients: [
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm32', nameEn: 'Red Bell Pepper', nameAr: 'فلفل رومي أحمر'},
+                    { code: 'm33', nameEn: 'Green Bell Pepper', nameAr: 'فلفل رومي أخضر'},
+                    { code: 'm44', nameEn: 'Red Onion', nameAr: 'بصل أحمر', weight: 25 },
+                    { code: 'm49', nameEn: 'Indian Black Pepper', nameAr: 'فلفل أسود هندي'},
+                    { code: 'sk-1275', nameEn: 'Chili Pepper Spice', nameAr: 'بهار فلفل شطة'},
+                    { code: 'm72', nameEn: 'Topside Beef', nameAr: 'لحم توب سايد'},
+                    { code: 'sk-1228', nameEn: 'Fat', nameAr: 'شحم'},
+                    { code: 'sk-1229', nameEn: 'Bobby Veal Meat', nameAr: 'لحم بيوفيل'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'}
+                ]
+            },
+            'chicken-kebab': {
+                code: 'm88',
+                name: { en: 'Chicken Kebab', ar: 'كباب دجاج' },
+                ingredients: [
+                    { code: 'm14', nameEn: 'Chicken Shawarma', nameAr: 'شاورما فراخ'},
+                    { code: 'sk-1228', nameEn: 'Fat', nameAr: 'شحم'},
+                    { code: 'm44', nameEn: 'Red Onion', nameAr: 'بصل أحمر' },
+                    { code: 'm33', nameEn: 'Green Bell Pepper', nameAr: 'فلفل رومي أخضر'},
+                    { code: 'm32', nameEn: 'Red Bell Pepper', nameAr: 'فلفل رومي أحمر'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل' },
+                    { code: 'm34', nameEn: 'Parsley', nameAr: 'بقدونس'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'}
+                ]
+            },
+            'shish-tawook': {
+                code: 'm90',
+                name: { en: 'Shish Tawook', ar: 'شيش طاووق' },
+                ingredients: [
+                    { code: 'm15', nameEn: 'Chicken Breasts', nameAr: 'صدور دجاج'},
+                    { code: 'sk-1239', nameEn: 'Yogurt', nameAr: 'زبادي'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'sk-1244', nameEn: 'Orange', nameAr: 'برتقال'},
+                    { code: 'm29', nameEn: 'Lemon', nameAr: 'ليمون'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'},
+                    { code: 'sk-1278', nameEn: 'Egg Yolk Powder', nameAr: 'بودر لون صفار البيض'}
+                ]
+            },
+            'tikka': {
+                code: 'sk-1252',
+                name: { en: 'Tikka', ar: 'تكا' },
+                ingredients: [
+                    { code: 'm15', nameEn: 'Chicken Breasts', nameAr: 'صدور دجاج'},
+                    { code: 'sk-1239', nameEn: 'Yogurt', nameAr: 'زبادي'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح',},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'sk-1244', nameEn: 'Orange', nameAr: 'برتقال'},
+                    { code: 'm29', nameEn: 'Lemon', nameAr: 'ليمون'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'},
+                    { code: 'sk-1235', nameEn: 'Strawberry Color Powder', nameAr: 'بودر لون فراولة'}
+                ]
+            },
+            'meat-skewers': {
+                code: 'm89',
+                name: { en: 'Meat Skewers', ar: 'أوصال لحم' },
+                ingredients: [
+                    { code: 'sk-1245', nameEn: 'Meat Skewers', nameAr: 'أوصال لحم'},
+                    { code: 'sk-1239', nameEn: 'Yogurt', nameAr: 'زبادي'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'm49', nameEn: 'Indian Black Pepper', nameAr: 'فلفل أسود هندي'},
+                    { code: 'sk-1275', nameEn: 'Chili Pepper Spice', nameAr: 'بهار فلفل شطة'},
+                    { code: 'sk-1228', nameEn: 'Fat', nameAr: 'شحم'}
+                ]
+            },
+            'grilled-chicken': {
+                code: 'm94',
+                name: { en: 'Grilled Chicken', ar: 'دجاج على الفحم' },
+                batchWeight: 1,
+                ingredients: [
+                    { code: 'sk-1243', nameEn: 'Chilled Chicken', nameAr: 'دجاج مبرد'},
+                    { code: 'sk-1239', nameEn: 'Yogurt', nameAr: 'زبادي'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'sk-1244', nameEn: 'Orange', nameAr: 'برتقال'},
+                    { code: 'm29', nameEn: 'Lemon', nameAr: 'ليمون'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'},
+                    { code: 'sk-1278', nameEn: 'Egg Yolk Powder', nameAr: 'بودر لون صفار البيض'}
+                ]
+            },
+            'wings': {
+                code: 'sk-1221',
+                name: { en: 'Wings', ar: 'أجنحة' },
+                ingredients: [
+                    { code: 'm59', nameEn: 'Chicken Wings', nameAr: 'أجنحة دجاج'},
+                    { code: 'sk-1239', nameEn: 'Yogurt', nameAr: 'زبادي'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'sk-1244', nameEn: 'Orange', nameAr: 'برتقال'},
+                    { code: 'm29', nameEn: 'Lemon', nameAr: 'ليمون'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'},
+                    { code: 'sk-1278', nameEn: 'Egg Yolk Powder', nameAr: 'بودر لون صفار البيض'}
+                ]
+            },
+            'thighs': {
+                code: 'sk-1438',
+                name: { en: 'Thighs', ar: 'أفخاذ' },
+                ingredients: [
+                    { code: 'm60', nameEn: 'Chicken Thighs', nameAr: 'أفخاذ الدجاج'},
+                    { code: 'sk-1239', nameEn: 'Yogurt', nameAr: 'زبادي'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'sk-1244', nameEn: 'Orange', nameAr: 'برتقال'},
+                    { code: 'm29', nameEn: 'Lemon', nameAr: 'ليمون'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'},
+                    { code: 'sk-1278', nameEn: 'Egg Yolk Powder', nameAr: 'بودر لون صفار البيض'}
+                ]
+            },
+            'tahini': {
+                code: 'm97',
+                name: { en: 'Tahini', ar: 'طحينة' },
+                ingredients: [
+                    { code: 'm91', nameEn: 'Hummus', nameAr: 'حمص'},
+                    { code: 'm1', nameEn: 'Al Jameel Tahini', nameAr: 'طحينة الجميل'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'sk-1238', nameEn: 'Ice', nameAr: 'ثلج'},
+                    { code: 'm77', nameEn: 'Lemon Salt', nameAr: 'ملح ليمون'},
+                    { code: 'sk-1275', nameEn: 'Chili Pepper Spice', nameAr: 'بهار فلفل شطة'},
+                    { code: 'unknown', nameEn: 'Water', nameAr: 'ماء'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'}
+                ]
+            },
+            'mixed-spice': {
+                code: 'm?',
+                name: { en: 'Mixed Spice', ar: 'بهار مشكل' },
+                ingredients: [
+                    { code: 'm48', nameEn: 'Ground Coriander', nameAr: 'كزبرة مطحونة'},
+                    { code: 'm51', nameEn: 'Ginger Ground', nameAr: 'زنجبيل مطحون'},
+                    { code: 'm52', nameEn: 'Garlic Powder', nameAr: 'ثوم بودر'},
+                    { code: 'm49', nameEn: 'Indian Black Pepper', nameAr: 'فلفل أسود هندي'},
+                    { code: 'sk-1275', nameEn: 'Chili Pepper Spice', nameAr: 'بهار فلفل شطة'},
+                    { code: 'sk-1231', nameEn: 'Cardamom', nameAr: 'هيل'},
+                    { code: 'sk-1232', nameEn: 'Curry Powder', nameAr: 'كاري بودر'}
+                ]
+            },
+            'taco-sauce': {
+                code: 'm95',
+                name: { en: 'Taco Sauce', ar: 'صوص تكا' },
+                ingredients: [
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm69', nameEn: 'Eggs', nameAr: 'بيض'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'm85', nameEn: 'Mustard', nameAr: 'خردل'},
+                    { code: 'm4', nameEn: 'Jar of tomato ketchup', nameAr: 'جركن كاتشب طماطم'},
+                    { code: 'sk-1274', nameEn: 'Cornstarch', nameAr: 'نشا ذرة'},
+                    { code: 'm77', nameEn: 'Lemon Salt', nameAr: 'ملح ليمون'},
+                    { code: 'sk-1275', nameEn: 'Chili Pepper Spice', nameAr: 'بهار فلفل شطة'},
+                    { code: 'm11', nameEn: 'Sugar', nameAr: 'سكر'},
+                    { code: 'sk-1232', nameEn: 'Curry Powder', nameAr: 'كاري بودر'},
+                    { code: 'm40', nameEn: 'Vinegar', nameAr: 'خل'}
+                ]
+            },
+            'double-x-sauce': {
+                code: 'sk-1262',
+                name: { en: 'Double X Sauce', ar: 'صوص دبل اكس شيش' },
+                ingredients: [
+                    { code: 'unknown', nameEn: 'Tomato paste', nameAr: 'صلصة معجون الطماطم'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'm3', nameEn: 'Pepper Sauce', nameAr: 'صلصة فلفل'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة' },
+                    { code: 'm4', nameEn: 'Jar of tomato ketchup', nameAr: 'جركن كاتشب طماطم'},
+                    { code: 'unknown', nameEn: 'Mixed Spice', nameAr: 'بهار مشكل'},
+                    { code: 'sk-1278', nameEn: 'Egg Yolk Powder', nameAr: 'بودر لون صفار البيض'},
+                    { code: 'unknown', nameEn: 'Water', nameAr: 'ماء'}
+                ]
+            },
+            'cheese-sauce': {
+                code: 'm99',
+                name: { en: 'Cheese Sauce', ar: 'صوص جبن' },
+                ingredients: [
+                    { code: 'm46', nameEn: 'Milk', nameAr: 'حليب'},
+                    { code: 'm36', nameEn: 'Cheese Slices', nameAr: 'جبن شرائح'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'sk-1278', nameEn: 'Egg Yolk Powder', nameAr: 'بودر لون صفار البيض'},
+                    { code: 'sk-1439', nameEn: 'Ghee', nameAr: 'سمنة'}
+                ]
+            },
+            'hummus': {
+                code: 'm91',
+                name: { en: 'Hummus', ar: 'حمص' },
+                ingredients: [
+                    { code: 'sk-1251', nameEn: '12mm Chickpeas', nameAr: 'حمص حب 12 مم'},
+                    { code: 'm1', nameEn: 'Al Jameel Tahini', nameAr: 'طحينة الجميل'},
+                    { code: 'sk-1230', nameEn: 'Salt', nameAr: 'ملح'},
+                    { code: 'sk-1238', nameEn: 'Ice', nameAr: 'ثلج'},
+                    { code: 'm39', nameEn: 'Corn Oil', nameAr: 'زيت ذرة'},
+                    { code: 'm77', nameEn: 'Lemon Salt', nameAr: 'ملح ليمون'}
+                ]
+            }
+        };
+
+        // Recipe Dropdown Functions
+        function toggleRecipeDropdown() {
+            const dropdown = document.getElementById('recipeDropdown');
+            dropdown.classList.toggle('hidden');
+            if (!dropdown.classList.contains('hidden')) {
+                if (!document.getElementById('recipeOptions').innerHTML) {
+                    populateRecipeDropdown();
+                }
+                // Add clickaway listener
+                setTimeout(() => document.addEventListener('click', clickAwayListener));
+            } else {
+                document.removeEventListener('click', clickAwayListener);
+            }
+        }
+
+        function clickAwayListener(event) {
+            const dropdown = document.getElementById('recipeDropdown');
+            if (!dropdown.contains(event.target) && !document.getElementById('searchRecipe').contains(event.target)) {
+                dropdown.classList.add('hidden');
+                document.removeEventListener('click', clickAwayListener);
+            }
+        }
+
+        function populateRecipeDropdown() {
+            const recipeOptions = document.getElementById('recipeOptions');
+            recipeOptions.innerHTML = `
+                <div class="p-2 bg-gray-50 border-b">
+                    <input type="text" id="recipeSearch" placeholder="Search recipes..." 
+                           class="w-full px-3 py-2 rounded-lg" 
+                           oninput="filterRecipes(this.value)">
+                </div>
+            `;
+
+            const allRecipes = Object.entries(recipes);
+            allRecipes.slice(0, 6).forEach(([key, recipe]) => {
+                const div = document.createElement('div');
+                div.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
+                div.innerHTML = `${recipe.code} - ${recipe.name.en} - ${recipe.name.ar}`;
+                div.onclick = () => selectRecipe(key);
+                recipeOptions.appendChild(div);
+            });
+
+            if(allRecipes.length > 6) {
+                const showAll = document.createElement('div');
+                showAll.className = 'px-4 py-2 text-blue-600 cursor-pointer hover:bg-gray-100';
+                showAll.innerHTML = 'Show all recipes | اضغط لباقي الوصفات...';
+                showAll.onclick = showAllRecipes;
+                recipeOptions.appendChild(showAll);
+            }
+        }
+
+        function filterRecipes(searchTerm) {
+            const filtered = Object.entries(recipes).filter(([key, recipe]) => {
+                const text = `${recipe.code} ${recipe.name.en} ${recipe.name.ar}`.toLowerCase();
+                return text.includes(searchTerm.toLowerCase());
+            });
+            
+            const recipeOptions = document.getElementById('recipeOptions');
+            recipeOptions.innerHTML = `
+                <div class="p-2 bg-gray-50 border-b">
+                    <input type="text" id="recipeSearch" placeholder="Search recipes..." 
+                           class="w-full px-3 py-2 rounded-lg" 
+                           value="${searchTerm}"
+                           oninput="filterRecipes(this.value)">
+                </div>
+            `;
+
+            filtered.forEach(([key, recipe]) => {
+                const div = document.createElement('div');
+                div.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
+                div.innerHTML = `${recipe.code} - ${recipe.name.en} - ${recipe.name.ar}`;
+                div.onclick = () => selectRecipe(key);
+                recipeOptions.appendChild(div);
+            });
+        }
+
+        function showAllRecipes() {
+            document.getElementById('recipeSearch').value = '';
+            filterRecipes('');
+        }
+
+        function selectRecipe(key) {
+            selectedRecipe = recipes[key];
+            document.getElementById('recipeDropdown').classList.add('hidden');
+            document.getElementById('searchRecipe').value = 
+                `${selectedRecipe.code} - ${selectedRecipe.name.en} - ${selectedRecipe.name.ar}`;
+            
+            const tbody = document.getElementById('ingredientsBody');
+            tbody.innerHTML = selectedRecipe.ingredients.map(ingredient => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-3">${ingredient.code}</td>
+                    <td class="px-4 py-3">
+                        <div>${ingredient.nameEn}</div>
+                        <div class="text-gray-600">${ingredient.nameAr}</div>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                        <input type="number" class="w-32 px-2 py-1 border rounded" 
+                               placeholder="Enter grams" required>
+                    </td>
+                </tr>
+            `).join('');
+            document.getElementById('ingredientsContainer').classList.remove('hidden');
+        }
+
+        // Photo Handling
+        document.getElementById('uploadPhotoBtn').addEventListener('click', () => 
+            document.getElementById('batchPhoto').click());
+        
+        document.getElementById('batchPhoto').addEventListener('change', function(e) {
+            uploadedPhotos = [];
+            const files = Array.from(this.files);
+            const previewContainer = document.getElementById('previewContainer');
+            previewContainer.innerHTML = '';
+
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    uploadedPhotos.push(event.target.result);
+                    const img = document.createElement('img');
+                    img.src = event.target.result;
+                    img.className = 'preview-image rounded-lg';
+                    previewContainer.appendChild(img);
+                };
+                reader.readAsDataURL(file);
+            });
+        });
+
+    // PDF Generation
+    document.getElementById('generatePdfBtn').addEventListener('click', async () => {
+        if (!validateForm()) return;
+    
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfElement = document.getElementById('pdf-content');
+        
+        // Hide photos container before capturing main content
+        const photosContainer = document.getElementById('pdf-photos-container');
+        photosContainer.style.display = 'none';
+        
+        // Update PDF elements (excluding photos)
+        document.getElementById('pdf-prepared-by').textContent = 
+            document.getElementById('preparedBy').value;
+        document.getElementById('pdf-batch-weight').textContent = 
+            document.getElementById('batchWeight').value;
+        document.getElementById('pdf-datetime').textContent = 
+            new Date().toLocaleString();
+        document.getElementById('pdf-item-code').textContent = selectedRecipe.code;
+        document.getElementById('pdf-item-name').textContent = 
+            `${selectedRecipe.name.en} - ${selectedRecipe.name.ar}`;
+
+        const pdfIngredients = document.getElementById('pdf-ingredients');
+        pdfIngredients.innerHTML = '';
+        selectedRecipe.ingredients.forEach((ingredient, index) => {
+            const quantityInput = document.querySelectorAll('#ingredientsBody input')[index].value;
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="border p-2">${ingredient.code}</td>
+                <td class="border p-2">${ingredient.nameEn}<br><span class="text-gray-600">${ingredient.nameAr}</span></td>
+                <td class="border p-2 text-right">${quantityInput || '0'}g</td>
+            `;
+            pdfIngredients.appendChild(row);
+        });
+
+        // Generate main content
+        pdfElement.classList.remove('hidden');
+        await new Promise(resolve => setTimeout(resolve, 500));
+        const canvas = await html2canvas(pdfElement, {
+            scale: 1,
+            logging: true,
+            useCORS: true
+        });
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        const imgProps = pdf.getImageProperties(imgData);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+
+        // Show photos container again
+        photosContainer.style.display = 'block';
+        pdfElement.classList.add('hidden');
+
+        // Add each photo to a new page
+        for (const photoData of uploadedPhotos) {
+            const img = new Image();
+            img.src = photoData;
+            await new Promise((resolve) => {
+                img.onload = resolve;
+            });
+
+            // Calculate dimensions with 20mm margins
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const margin = 20;
+            const maxWidth = pageWidth - margin * 2;
+            const maxHeight = pageHeight - margin * 2;
+
+            // Calculate aspect ratio
+            const imgRatio = img.width / img.height;
+            const maxRatio = maxWidth / maxHeight;
+
+            let width, height;
+            if (imgRatio > maxRatio) {
+                width = maxWidth;
+                height = maxWidth / imgRatio;
+            } else {
+                height = maxHeight;
+                width = maxHeight * imgRatio;
+            }
+
+            // Add new page and image
+            pdf.addPage();
+            const x = margin + (maxWidth - width) / 2;
+            const y = margin + (maxHeight - height) / 2;
+            pdf.addImage(img, 'JPEG', x, y, width, height);
+        }
+
+        pdf.save(`production-report-${Date.now()}.pdf`);
+        pdfElement.classList.add('hidden');
+    });
+
+        // Form Validation
+        function validateForm() {
+            let isValid = true;
+
+            if (!document.getElementById('batchWeight').value || isNaN(document.getElementById('batchWeight').value)) {
+                alert('Please enter valid batch weight');
+                isValid = false;
+            }
+
+            if (!document.getElementById('preparedBy').value.trim()) {
+                alert('Please enter preparer name');
+                isValid = false;
+            }
+
+            if (uploadedPhotos.length === 0) {
+                alert('Please upload at least one batch photo');
+                isValid = false;
+            }
+
+            return isValid;
+        }
+    </script>
+</body>
+</html>
